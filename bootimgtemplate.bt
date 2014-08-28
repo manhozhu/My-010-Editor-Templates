@@ -1,0 +1,101 @@
+//-----------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+// File:     bootimgtemplate.bt
+// Author:   manhozhu
+// Revision: 0.2
+// Purpose:  Android boot image模版
+// Changes:  
+// 0.2: 
+//   - 改变boot image的显示结构
+// 0.1: 
+//   - 初始版本
+//-----------------------------------
+
+local unsigned int BOOT_MAGIC_SIZE = 8;
+local unsigned int BOOT_NAME_SIZE = 16;
+local unsigned int BOOT_ARGS_SIZE = 512;
+local unsigned int SEANDROID_MAGIC_SIZE = 16;
+local unsigned int SEANDROID_HASH_SIZE = 256;
+
+// boot image
+struct {
+	// header
+	struct {
+		char magic[BOOT_MAGIC_SIZE];
+		
+		unsigned int kernel_size<format=hex>;
+		unsigned int kernel_addr<format=hex>;
+		
+		unsigned int ramdisk_size<format=hex>;
+		unsigned int ramdisk_addr<format=hex>;
+		
+		unsigned int second_size<format=hex>;
+		unsigned int second_addr<format=hex>;
+		
+		unsigned int tags_addr<format=hex>;
+		unsigned int page_size<format=hex>;
+		unsigned int unused[2];
+		
+		char name[BOOT_NAME_SIZE];
+		
+		char cmdline[BOOT_ARGS_SIZE];
+		
+		unsigned int id[8];
+		
+		local int padding_size = page_size - FTell();
+		if (padding_size > 0) {
+			unsigned char header_padding[padding_size]<format=hex>;
+		}
+	} header;
+
+	// kernel
+	local int kernel_pages = (header.kernel_size + header.page_size - 1)/header.page_size;
+	if (kernel_pages > 0) {
+		local int kernel_size = kernel_pages * header.page_size;
+		struct {
+			unsigned char kernel_content[header.kernel_size]<format=hex>;
+			if (kernel_size != header.kernel_size) {
+				unsigned char kernel_padding[kernel_size - header.kernel_size]<format=hex>;
+			}
+		}kernel;
+	}
+
+	// ramdisk
+	local int ramdisk_pages = (header.ramdisk_size + header.page_size - 1)/header.page_size;
+	if (ramdisk_pages > 0) {
+		local int ramdisk_size = ramdisk_pages * header.page_size;
+		struct {
+			unsigned char ramdisk_content[header.ramdisk_size]<format=hex>;
+			if (ramdisk_size != header.ramdisk_size) {
+				unsigned char ramdisk_padding[ramdisk_size - header.ramdisk_size]<format=hex>;
+			}
+		}ramdisk;
+	}
+
+	// second
+	local int second_pages = (header.second_size + header.page_size - 1)/header.page_size;
+	if (second_pages > 0) {
+		local int second_size = second_pages * header.page_size;
+		struct {
+			unsigned char second_content[header.second_size]<format=hex>;
+			if (second_size != header.second_size) {
+				unsigned char second_padding[second_size - header.second_size]<format=hex>;
+			}
+		}second;
+	}
+}boot_image;
+
+// extra
+local int64 extra_size = FileSize() - FTell();
+if (extra_size > 0) {
+	struct {
+		char magic[SEANDROID_MAGIC_SIZE];
+		unsigned char sha1[SEANDROID_HASH_SIZE]<format=hex>;
+		
+		local int64 padding_size = extra_size - SEANDROID_MAGIC_SIZE - SEANDROID_HASH_SIZE;
+		if (padding_size > 0) {
+			unsigned char extra[padding_size]<format=hex>;
+		}
+	} seandroid;
+}
