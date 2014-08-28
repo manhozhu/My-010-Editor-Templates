@@ -1,0 +1,429 @@
+//-----------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+// File:     AndroidResourceTypes.bt
+// Author:   manhozhu
+// Revision: 0.1
+// Purpose:  Defines a template for
+//    parsing Android binary resource files.
+// Changes:  
+// 0.1: 
+//   - Initial version.
+//-----------------------------------
+
+// Define structures used in Android binary resource files
+
+//enum used for resource types
+typedef enum <ushort> { 
+    RES_NULL_TYPE               = 0x0000,
+    RES_STRING_POOL_TYPE        = 0x0001,
+    RES_TABLE_TYPE              = 0x0002,
+    RES_XML_TYPE                = 0x0003,
+
+    // Chunk types in RES_XML_TYPE
+    RES_XML_FIRST_CHUNK_TYPE    = 0x0100,
+    RES_XML_START_NAMESPACE_TYPE= 0x0100,
+    RES_XML_END_NAMESPACE_TYPE  = 0x0101,
+    RES_XML_START_ELEMENT_TYPE  = 0x0102,
+    RES_XML_END_ELEMENT_TYPE    = 0x0103,
+    RES_XML_CDATA_TYPE          = 0x0104,
+    RES_XML_LAST_CHUNK_TYPE     = 0x017f,
+    // This contains a uint32_t array mapping strings in the string
+    // pool back to resource identifiers.  It is optional.
+    RES_XML_RESOURCE_MAP_TYPE   = 0x0180,
+
+    // Chunk types in RES_TABLE_TYPE
+    RES_TABLE_PACKAGE_TYPE      = 0x0200,
+    RES_TABLE_TYPE_TYPE         = 0x0201,
+    RES_TABLE_TYPE_SPEC_TYPE    = 0x0202
+} RES_TYPE;
+
+// Header that appears at the front of every data chunk in a resource.
+typedef struct {
+	RES_TYPE type <format=hex, comment="Type identifier for this chunk.">;
+	ushort headerSize <comment="Size of the chunk header (in bytes).">;
+	uint size <comment="Total size of this chunk (in bytes).">;
+}RESCHUNK_HEADER;
+
+// Representation of a value in a resource, supplying type information.
+typedef struct {
+	ushort size <comment="Number of bytes in this structure.">;
+	uchar res0 <comment="Always set to 0.">;
+	uchar dataType <comment="Type of the data value.">;
+	uint data <comment="The data for this item, as interpreted according to dataType.">;
+}RES_VALUE;
+
+typedef struct {
+	RESCHUNK_HEADER string_pool_header;
+	uint stringCount;
+	uint styleCount;
+	uint flags;
+	uint stringsStart;
+	uint stylesStart;
+}RES_STRINGPOOL_HEADER;
+
+typedef struct {
+	local ushort str_len = ReadUShort( FTell() );
+	if (str_len & 0x8000) {
+		uint len;
+		len = ((str_len & 0x7FFF) << 16) + (len & 0xFFFF);
+	} else {
+		ushort len;
+	}
+	//ushort len;
+	wstring content;
+}RES_STRING_ENTRY;
+
+/*
+typedef struct {
+	uint nameIndex;
+	uint firstChar;
+	uint lastChar;
+}RES_STYLE_ENTRY;
+*/
+
+typedef struct {
+	RES_STRINGPOOL_HEADER header;
+	
+	if (header.stringCount > 0) {
+		uint stringOffsets[header.stringCount] <format=hex>;
+	}
+	
+	if (header.styleCount > 0) {
+		uint styleOffsets[header.styleCount] <format=hex>;
+	}
+	
+	
+	//if (header.stringCount > 0) {
+		wchar_t strings[((header.stylesStart == 0 ? header.string_pool_header.size:header.stylesStart) - header.stringsStart)/2];
+		/*
+		struct {
+			local int i;
+			for (i = 0; i < header.stringCount; i++) {
+				FSeek( startof( header ) + header.stringsStart + stringOffsets[i] );
+				RES_STRING_ENTRY stringEntry;
+			}
+		} stringEntries;
+		*/
+	//}
+	
+	if (header.stylesStart != 0) {
+		FSeek( startof( header ) + header.stylesStart );
+		uint styles[((header.string_pool_header.size - header.stylesStart) / 4)];
+	}
+}RES_STRINGPOOL;
+
+typedef struct {
+	RESCHUNK_HEADER header;
+	if (header.size > 0) {
+		uint ids[(header.size - header.headerSize)/sizeof(uint)];
+	}
+}RES_XMLREOUSRCEMAP;
+
+typedef struct
+{
+    uint ns <comment="Namespace of this attribute.">;
+    uint name <comment="Name of this attribute.">;
+    uint rawValue <comment="The original raw string value of this attribute.">;
+    RES_VALUE typedValue <comment="Processesd typed value of this attribute.">;
+}RES_XMLATTRIBUTE;
+
+typedef struct {
+	RESCHUNK_HEADER header;
+	uint lineNumber;
+	uint comment <comment="Optional XML comment that was associated with this element; -1 if none.">;
+}RES_XMLNODE;
+
+typedef struct {
+	uint data <comment="The raw CDATA character data.">;
+	RES_VALUE typedData <comment="The typed value of the character data if this is a CDATA node.">;
+}RES_XMLCDATAEXT;
+
+typedef struct {
+	uint prefix <comment="The prefix of the namespace.">;
+	uint uri<comment="The URI of the namespace.">;
+}RES_XMLNAMESPACEEXT;
+
+typedef struct {
+	uint ns<comment="String of the full namespace of this element.">;
+	uint name<comment="String name of this node if it is an ELEMENT; the raw character data if this is a CDATA node.">;
+}RES_XMLENDELEMENTEXT;
+
+typedef struct {
+    uint ns <comment="String of the full namespace of this element.">;
+    uint name <comment="String name of this node if it is an ELEMENT; the raw character data if this is a CDATA node.">;
+    ushort attributeStart <comment="Byte offset from the start of this structure where the attributes start.">;
+    ushort attributeSize <comment="Size of the ResXMLTree_attribute structures that follow.">;
+    ushort attributeCount <comment="Number of attributes associated with an ELEMENT.  These are available as an array of ResXMLTree_attribute structures immediately following this node.">;
+    ushort idIndex <comment="Index (1-based) of the \"id\" attribute. 0 if none.">;
+    ushort classIndex <comment="Index (1-based) of the \"class\" attribute. 0 if none.">;
+    ushort styleIndex <comment="Index (1-based) of the \"style\" attribute. 0 if none.">;
+	
+	if (attributeCount > 0) {
+		RES_XMLATTRIBUTE attributes[attributeCount];
+	}
+}RES_XMLSTARTELEMENTEXT;
+
+typedef struct {
+	RESCHUNK_HEADER header;
+	RES_STRINGPOOL string_block;
+	
+	local RES_TYPE type = ReadUShort( FTell() );
+	if (type == RES_XML_RESOURCE_MAP_TYPE) {
+		RES_XMLREOUSRCEMAP resourceMap;
+	}
+	
+	while (1 && !FEof()) {
+		type = ReadUShort( FTell() );
+		if (type == RES_XML_START_NAMESPACE_TYPE || type == RES_XML_END_NAMESPACE_TYPE) {
+			struct {
+				RES_XMLNODE node;
+				RES_XMLNAMESPACEEXT ext;
+			} NAMESPACE;
+		} else if (type == RES_XML_START_ELEMENT_TYPE) {
+			struct {
+				RES_XMLNODE node;
+				RES_XMLSTARTELEMENTEXT ext;
+			} STARTELEMENT;
+		} else if (type == RES_XML_END_ELEMENT_TYPE) {
+			struct {
+				RES_XMLNODE node;
+				RES_XMLENDELEMENTEXT ext;
+			} ENDELEMENT;
+		} else if (type == RES_XML_CDATA_TYPE) {
+			struct {
+				RES_XMLNODE node;
+				RES_XMLCDATAEXT ext;
+			} CDATA;
+		} else {
+			break;
+		}
+	}
+}RES_XMLTREE;
+
+typedef struct {
+    RESCHUNK_HEADER chunk_header;
+
+    uint packageCount <comment="The number of ResTable_package structures.">;
+}RES_TABLE_HEADER;
+
+typedef struct {
+	uint size <comment="Number of bytes in this structure.">;
+	
+	ushort mcc <comment="Mobile country code (from SIM).  0 means \"any\".">;
+	ushort mnc <comment="Mobile network code (from SIM).  0 means \"any\".">;
+	
+	char language[2] <comment="\\0\\0 means \"any\".  Otherwise, en, fr, etc.">;
+	char country[2] <comment="\\0\\0 means \"any\".  Otherwise, US, CA, etc.">;
+	
+	uchar orientation;
+	uchar touchscreen;
+	ushort density;
+	
+	uchar keyboard;
+	uchar navigation;
+	uchar inputFlags;
+	uchar inputPad0;
+	
+	ushort screenWidth;
+	ushort screenHeight;
+	
+	ushort sdkVersion;
+	ushort minorVersion <comment="For now minorVersion must always be 0!!!  Its meaning is currently undefined.">;
+	
+	if (size >= 32) {
+		uchar screenLayout;
+		uchar uiMode;
+		ushort smallestScreenWidthDp;
+	}
+	
+	if (size >= 36) {
+		ushort screenWidthDp;
+		ushort screenHeightDp;
+	}
+	
+	if (size >= 38) {
+		ushort layoutDirection;
+	}
+	
+	if (size > 38) {
+		byte chunk[size - 38];
+	}
+}RES_TABLE_CONFIG;
+
+typedef struct {
+	ushort size <comment="Number of bytes in this structure.">;
+	
+    enum {
+        // If set, this is a complex entry, holding a set of name/value
+        // mappings.  It is followed by an array of ResTable_map structures.
+        FLAG_COMPLEX = 0x0001,
+        // If set, this resource has been declared public, so libraries
+        // are allowed to reference it.
+        FLAG_PUBLIC = 0x0002
+    };
+    ushort flags;
+    
+    uint key <comment="Reference into ResTable_package::keyStrings identifying this entry.">;
+	
+	if ((flags & 0x0001) == 0) {
+		ushort size;
+		uchar zero;
+		uchar type;
+		uint data;
+	} else {
+		uint parent;
+		uint count;
+		
+		if (count > 0) {
+			struct {
+				local int i;
+				for (i = 0; i < count; i++) {
+					struct {
+						uint key;
+						struct {
+							ushort size;
+							uchar zero;
+							uchar type;
+							uint data;
+						} value;
+					} valueItem;
+				}
+			} valueItems;
+		}
+	}
+}RES_TABLE_ENTRY;
+
+typedef struct {
+    RESCHUNK_HEADER chunk_header;
+    uchar id <comment="The type identifier this chunk is holding.  Type IDs start at 1 (corresponding to the value of the type bits in a resource identifier).  0 is invalid.">;
+    uchar res0 <comment="Must be 0.">;
+    ushort res1 <comment="Must be 0.">;
+	
+    uint entryCount <comment="Number of uint32_t entry indices that follow.">;
+
+    uint entriesStart <comment="Offset from header where ResTable_entry data starts.">;
+    
+    RES_TABLE_CONFIG config <comment="Configuration this collection of entries is designed for.">;
+	
+	if (entryCount > 0) {
+		uint entryOffsets[entryCount];
+		
+		struct {
+			local int i;
+			for (i = 0; i < entryCount; i++) {
+				if (entryOffsets[i] == -1) {
+					continue;
+				}
+				
+				FSeek( startof(chunk_header) + entriesStart + entryOffsets[i] );
+				RES_TABLE_ENTRY entry;
+			}
+		} entries;
+	}
+}RES_TYPE_TYPE;
+
+typedef struct {
+    RESCHUNK_HEADER chunk_header;
+    uchar id <comment="The type identifier this chunk is holding.  Type IDs start at 1 (corresponding to the value of the type bits in a resource identifier).  0 is invalid.">;
+    uchar res0 <comment="Must be 0.">;
+    ushort res1 <comment="Must be 0.">;
+	
+    uint entryCount <comment="Number of uint32_t entry configuration masks that follow.">;
+	if (entryCount > 0) {
+		uint flags[entryCount];
+	}
+	
+	local RES_TYPE type_type = ReadUShort( FTell() );
+	if (type_type == RES_TABLE_TYPE_TYPE) {
+		struct {
+			while (true) {
+				if (type_type != RES_TABLE_TYPE_TYPE) {
+					break;
+				}
+				
+				RES_TYPE_TYPE type;
+				
+                if (FEof()) {
+                    break;
+                }
+				type_type = ReadUShort( FTell() );
+			}
+		} types;
+	}
+}RES_TYPESPEC_TYPE;
+
+typedef struct {
+    RESCHUNK_HEADER chunk_header;
+
+    // If this is a base package, its ID.  Package IDs start
+    // at 1 (corresponding to the value of the package bits in a
+    // resource identifier).  0 means this is not a base package.
+    uint id;
+
+    wchar_t name[128] <comment="Actual name of this package, \0-terminated.">;
+
+    // Offset to a ResStringPool_header defining the resource
+    // type symbol table.  If zero, this package is inheriting from
+    // another base package (overriding specific values in it).
+    uint typeStrings;
+
+    // Last index into typeStrings that is for public use by others.
+    uint lastPublicType;
+
+    // Offset to a ResStringPool_header defining the resource
+    // key symbol table.  If zero, this package is inheriting from
+    // another base package (overriding specific values in it).
+    uint keyStrings;
+
+    // Last index into keyStrings that is for public use by others.
+    uint lastPublicKey;
+	
+	RES_STRINGPOOL typeString_block;
+	RES_STRINGPOOL keyString_block;
+	
+	struct {
+		local RES_TYPE spec_type = RES_TABLE_TYPE_SPEC_TYPE;
+		while (true && !FEof()) {
+			spec_type = ReadUShort( FTell() );
+			
+			if (spec_type != RES_TABLE_TYPE_SPEC_TYPE) {
+				break;
+			}
+			
+			RES_TYPESPEC_TYPE type_spec;
+		}
+	} type_specs;
+}RES_PACKAGE;
+
+typedef struct {
+    RES_TABLE_HEADER table_header;
+	
+	RES_STRINGPOOL string_block;
+	
+	struct {
+		local int i;
+		for (i = 0; i < table_header.packageCount; i++) {
+			RES_PACKAGE package;
+		}
+	} packages;
+}RES_TABLE;
+
+// Define the file
+local RES_TYPE type;
+LittleEndian();
+
+while (!FEof()) {
+	type = ReadUShort( FTell() );
+
+	if (type == RES_XML_TYPE) {
+		RES_XMLTREE xmltree;
+	} else if (type == RES_STRING_POOL_TYPE) {
+		RES_STRINGPOOL string_block;
+	} else if (type == RES_TABLE_TYPE) {
+		RES_TABLE table;
+	} else {
+		Printf("unknown resource type:%d", type);
+		break;
+	}
+}
