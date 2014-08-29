@@ -1,0 +1,238 @@
+//---------------------------------------------
+// 010 editor template for cpio file format
+//
+// Author:   manhozhu
+// Revision: 0.1
+//---------------------------------------------
+
+local unsigned int MAGIC_SIZE = 6;
+local unsigned int BLOCK_SIZE = 512;
+
+typedef enum <uchar>{
+	OCT = 8,
+	DEC = 10,
+	HEX = 16,
+} BASE;
+
+local unsigned short FORMAT_OLD = 0x71C7; // Old Binary Format
+local char FORMAT_ODC[] = "070707"; // Portable ASCII Format
+local char FORMAT_NEWC[] = "070701"; // New ASCII Format
+local char FORMAT_CRC[] = "070702"; // New CRC Format
+
+local char ARCHIVE_TRAILER[] = "TRAILER!!!";
+
+// -- helper functions
+
+int Hex2Int(char data) {
+	local int value = 0;
+	
+	if (data >= '0' && data <= '9') {
+		value = data - '0';
+	} else if (data >= 'a' && data <= 'f') {
+		value = data - 'a';
+		value += 10;
+	} else if (data >= 'A' && data <= 'F') {
+		value = data - 'A';
+		value += 10;
+	}
+	
+	return value;
+}
+
+int String2Int(char data[], BASE base) {
+	local int count = 0;
+	
+    local int i = 0;
+	for(i = 0; i < sizeof(data); i++ ) {
+		count = count * base + (base == HEX ? Hex2Int(data[i]): (data[i] - '0'));
+	}
+	
+	return count;
+}
+
+// -- cpio record format
+
+typedef struct {
+	struct {
+		unsigned short c_magic<comment="Old Binary Format">;
+		unsigned short c_dev;
+		unsigned short c_ino;
+		unsigned short c_mode;
+		unsigned short c_uid;
+		unsigned short c_gid;
+		unsigned short c_nlink;
+		unsigned short c_rdev;
+		unsigned short c_mtime[2];
+		unsigned short c_namesize;
+		unsigned short c_filesize[2];
+	} header;
+
+	if (header.c_namesize > 0) {
+		struct {
+			char data[header.c_namesize];
+			if (header.c_namesize % 2) {
+				unsigned char padding[1];
+			}
+		} name;
+	}
+
+	local int filesize = ((int)header.c_filesize[0] << 16) + header.c_filesize[1];
+	if (filesize > 0) {
+		struct {
+			unsigned char data[filesize];
+			if (filesize % 2) {
+				unsigned char padding[1];
+			}
+		} file;
+	}
+}OLD_BINARY_ENTRY;
+
+typedef struct {
+	struct {
+		char c_magic[6]<comment="Portable ASCII Format">;
+		char c_dev[6];
+		char c_ino[6];
+		char c_mode[6];
+		char c_uid[6];
+		char c_gid[6];
+		char c_nlink[6];
+		char c_rdev[6];
+		char c_mtime[11];
+		char c_namesize[6];
+		char c_filesize[11];
+	} header;
+
+	local int namesize = String2Int(header.c_namesize, OCT);
+	if (namesize > 0) {
+		struct {
+			char data[namesize];
+		} name;
+	}
+
+	local int filesize = String2Int(header.c_filesize, OCT);
+	if (filesize > 0) {
+		struct {
+			unsigned char data[filesize];
+		} file;
+	}
+}OLD_CHARACTER_ENTRY;
+
+typedef struct {
+	struct {
+		char c_magic[MAGIC_SIZE]<comment="New ASCII Format">;
+		char c_ino[8];
+		char c_mode[8];
+		char c_uid[8];
+		char c_gid[8];
+		char c_nlink[8];
+		char c_mtime[8];
+		char c_filesize[8];
+		char c_devmajor[8];
+		char c_devminor[8];
+		char c_rdevmajor[8];
+		char c_rdevminor[8];
+		char c_namesize[8];
+		char c_check[8];
+	} header;
+
+	local int namesize = String2Int(header.c_namesize, HEX);
+	if (namesize > 0) {
+		struct {
+			char data[namesize];
+			
+			local int padding_size = 4 - (sizeof(header) + namesize) % 4;
+			if (padding_size < 4) { // need padding
+				unsigned char padding[padding_size]<format=hex>;
+			}
+		} name;
+	}
+
+	local int filesize = String2Int(header.c_filesize, HEX);
+	if (filesize > 0) {
+		struct {
+			unsigned char data[filesize];
+			
+			local int padding_size = 4 - (filesize % 4);
+			if (padding_size < 4) {
+				unsigned char padding[padding_size]<format=hex>;
+			}
+		} file;
+	}
+}NEW_ASCII_ENTRY;
+
+typedef struct {
+	struct {
+		char c_magic[MAGIC_SIZE]<comment="New CRC Format">;
+		char c_ino[8];
+		char c_mode[8];
+		char c_uid[8];
+		char c_gid[8];
+		char c_nlink[8];
+		char c_mtime[8];
+		char c_filesize[8];
+		char c_devmajor[8];
+		char c_devminor[8];
+		char c_rdevmajor[8];
+		char c_rdevminor[8];
+		char c_namesize[8];
+		char c_check[8];
+	} header;
+
+	local int namesize = String2Int(header.c_namesize, HEX);
+	if (namesize > 0) {
+		struct {
+			char data[namesize];
+			
+			local int padding_size = 4 - (sizeof(header) + namesize) % 4;
+			if (padding_size < 4) { // need padding
+				unsigned char padding[padding_size]<format=hex>;
+			}
+		} name;
+	}
+
+	local int filesize = String2Int(header.c_filesize, HEX);
+	if (filesize > 0) {
+		struct {
+			unsigned char data[filesize];
+			
+			local int padding_size = 4 - (filesize % 4);
+			if (padding_size < 4) {
+				unsigned char padding[padding_size]<format=hex>;
+			}
+		} file;
+	}
+}NEW_CRC_ENTRY;
+
+// -- parse cpio file
+local unsigned short entry_type;
+local char ascii_magic_type[MAGIC_SIZE];
+
+struct {
+	struct {
+		while (!FEof()) {
+			entry_type = ReadUShort( FTell() );
+			if (entry_type == FORMAT_OLD) {
+				OLD_BINARY_ENTRY entry;
+			} else {
+				ReadBytes(ascii_magic_type, FTell(), MAGIC_SIZE);
+				
+				if (Strcmp(ascii_magic_type, FORMAT_ODC) == 0) {
+					OLD_CHARACTER_ENTRY entry;
+				} else if (Strcmp(ascii_magic_type, FORMAT_NEWC) == 0) {
+					NEW_ASCII_ENTRY entry;
+				} else if (Strcmp(ascii_magic_type, FORMAT_CRC) == 0) {
+					NEW_CRC_ENTRY entry;
+				}
+			}
+			
+			if (Strcmp(entry.name.data, ARCHIVE_TRAILER) == 0) {
+				break;
+			}
+		}
+	} entries;
+
+	// block size(512) aligned
+	if (!FEof()) {
+		unsigned char padding[FileSize() - FTell()]<format=hex>;
+	}
+} cpio;
