@@ -3,12 +3,14 @@
 //
 // File:     AndroidResourceTypes.bt
 // Author:   manhozhu
-// Revision: 0.1
+// Revision: 0.2
 // Purpose:  Defines a template for
 //    parsing Android binary resource files.
 // Changes:  
 // 0.1: 
 //   - Initial version.
+// 0.2:
+//   - support utf-8 encoding
 //-----------------------------------
 
 // Define structures used in Android binary resource files
@@ -62,25 +64,58 @@ typedef struct {
 	uint stylesStart;
 }RES_STRINGPOOL_HEADER;
 
-typedef struct {
-	local ushort str_len = ReadUShort( FTell() );
-	if (str_len & 0x8000) {
-		uint len;
-		len = ((str_len & 0x7FFF) << 16) + (len & 0xFFFF);
+string decodeLength16(ushort len) {
+	string s;
+	
+	SPrintf(s, "%d", ((len & 0x7F) << 8) + (len >> 8));
+	
+	return s;
+}
+
+string decodeLength32(uint len) {
+	string s;
+	
+	SPrintf(s, "%d", ((len & 0x7FFF) << 16) + (len >> 16));
+	
+	return s;
+}
+
+typedef struct (int flags) {
+	if ((flags & 0x100) != 0) { // utf-8 encoded
+		// utf-16 len
+		local char str_len = ReadByte( FTell() );
+		if ((str_len & 0x80) != 0) {
+			ushort u16Len<read=decodeLength16>;
+		} else {
+			char u16Len;
+		}
+		
+		// utf-8 len
+		str_len = ReadByte( FTell() );
+		if ((str_len & 0x80) != 0) {
+			ushort u8Len<read=decodeLength16>;
+		} else {
+			byte u8Len;
+		}
+		
+		string content;
 	} else {
-		ushort len;
+		local ushort str_len = ReadUShort( FTell() );
+		if ((str_len & 0x8000) != 0) {
+			uint len <read=decodeLength32>;
+		} else {
+			ushort len;
+		}
+		
+		wstring content;
 	}
-	//ushort len;
-	wstring content;
 }RES_STRING_ENTRY;
 
-/*
 typedef struct {
 	uint nameIndex;
 	uint firstChar;
 	uint lastChar;
 }RES_STYLE_ENTRY;
-*/
 
 typedef struct {
 	RES_STRINGPOOL_HEADER header;
@@ -93,23 +128,37 @@ typedef struct {
 		uint styleOffsets[header.styleCount] <format=hex>;
 	}
 	
-	
-	//if (header.stringCount > 0) {
-		wchar_t strings[((header.stylesStart == 0 ? header.string_pool_header.size:header.stylesStart) - header.stringsStart)/2];
-		/*
+	if (header.stringCount > 0) {
 		struct {
 			local int i;
 			for (i = 0; i < header.stringCount; i++) {
 				FSeek( startof( header ) + header.stringsStart + stringOffsets[i] );
-				RES_STRING_ENTRY stringEntry;
+				RES_STRING_ENTRY stringEntry(header.flags);
+			}
+			
+			local int trailer_len = 0;
+			if (header.stylesStart != 0) {
+				trailer_len = startof( header ) + header.stylesStart - FTell();
+			} else {
+				trailer_len = startof( header ) + header.string_pool_header.size - FTell();
+			}
+			if (trailer_len > 0) {
+				char trail[trailer_len];
 			}
 		} stringEntries;
-		*/
-	//}
+	}
 	
 	if (header.stylesStart != 0) {
-		FSeek( startof( header ) + header.stylesStart );
-		uint styles[((header.string_pool_header.size - header.stylesStart) / 4)];
+		FSeek( startof( header ) + header.stylesStart);
+		struct {
+			local int i;
+			for (i = 0; i < header.styleCount; i++) {
+				FSeek( startof( header ) + header.stylesStart + styleOffsets[i] );
+				RES_STYLE_ENTRY stringStyle;
+			}
+			
+			RES_STYLE_ENTRY endSpan;
+		} stringStyles;
 	}
 }RES_STRINGPOOL;
 
@@ -323,6 +372,67 @@ typedef struct {
 	}
 }RES_TYPE_TYPE;
 
+typedef enum <uint> {
+    ACONFIGURATION_MCC = 0x0001,
+    ACONFIGURATION_MNC = 0x0002,
+    ACONFIGURATION_LOCALE = 0x0004,
+    ACONFIGURATION_TOUCHSCREEN = 0x0008,
+    ACONFIGURATION_KEYBOARD = 0x0010,
+    ACONFIGURATION_KEYBOARD_HIDDEN = 0x0020,
+    ACONFIGURATION_NAVIGATION = 0x0040,
+    ACONFIGURATION_ORIENTATION = 0x0080,
+    ACONFIGURATION_DENSITY = 0x0100,
+    ACONFIGURATION_SCREEN_SIZE = 0x0200,
+    ACONFIGURATION_VERSION = 0x0400,
+    ACONFIGURATION_SCREEN_LAYOUT = 0x0800,
+    ACONFIGURATION_UI_MODE = 0x1000,
+    ACONFIGURATION_SMALLEST_SCREEN_SIZE = 0x2000,
+    ACONFIGURATION_LAYOUTDIR = 0x4000,
+	SPEC_PUBLIC = 0x40000000,
+}TYPESPEC_CONFIG;
+
+string decodeConfig(uint val) {
+	string s;
+	
+	int enum_size = 16;
+	TYPESPEC_CONFIG enum_vals[enum_size] = {
+	ACONFIGURATION_MCC, 
+	ACONFIGURATION_MNC, 
+	ACONFIGURATION_LOCALE, 
+	ACONFIGURATION_TOUCHSCREEN, 
+	ACONFIGURATION_KEYBOARD, 
+	ACONFIGURATION_KEYBOARD_HIDDEN, 
+	ACONFIGURATION_NAVIGATION, 
+	ACONFIGURATION_ORIENTATION, 
+	ACONFIGURATION_DENSITY, 
+	ACONFIGURATION_SCREEN_SIZE, 
+	ACONFIGURATION_VERSION, 
+	ACONFIGURATION_SCREEN_LAYOUT, 
+	ACONFIGURATION_UI_MODE, 
+	ACONFIGURATION_SMALLEST_SCREEN_SIZE, 
+	ACONFIGURATION_LAYOUTDIR, 
+	SPEC_PUBLIC
+	};
+	
+	char first = 1;
+    int i;
+	TYPESPEC_CONFIG enum_val;
+	for (i = 0; i < enum_size; i++) {
+		enum_val = enum_vals[i];
+		if (val & enum_val) {
+			if (first == 0) {
+				s += "|";
+			} else {
+				first = 0;
+			}
+			
+			s += EnumToString(enum_val);
+		}
+	}
+	
+	return s;
+}
+
 typedef struct {
     RESCHUNK_HEADER chunk_header;
     uchar id <comment="The type identifier this chunk is holding.  Type IDs start at 1 (corresponding to the value of the type bits in a resource identifier).  0 is invalid.">;
@@ -331,7 +441,7 @@ typedef struct {
 	
     uint entryCount <comment="Number of uint32_t entry configuration masks that follow.">;
 	if (entryCount > 0) {
-		uint flags[entryCount];
+		uint flags[entryCount] <read=decodeConfig>;
 	}
 	
 	local RES_TYPE type_type = ReadUShort( FTell() );
